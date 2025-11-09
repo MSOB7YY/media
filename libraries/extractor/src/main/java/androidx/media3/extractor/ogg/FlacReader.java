@@ -44,6 +44,11 @@ import org.checkerframework.checker.nullness.qual.EnsuresNonNullIf;
   @Nullable private FlacStreamMetadata streamMetadata;
   @Nullable private FlacOggSeeker flacOggSeeker;
 
+
+  public FlacReader(long streamSerialNumber) {
+    super(streamSerialNumber);
+  }
+
   public static boolean verifyBitstreamType(ParsableByteArray data) {
     return data.bytesLeft() >= 5
         && data.readUnsignedByte() == 0x7F
