@@ -84,6 +84,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.zip.DataFormatException;
+import java.util.zip.Inflater;
 import org.checkerframework.checker.nullness.qual.EnsuresNonNull;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.checkerframework.checker.nullness.qual.RequiresNonNull;
@@ -257,6 +259,8 @@ public class MatroskaExtractor implements Extractor {
   private static final int ID_CONTENT_ENCODING_ORDER = 0x5031;
   private static final int ID_CONTENT_ENCODING_SCOPE = 0x5032;
   private static final int ID_CONTENT_COMPRESSION = 0x5034;
+  private static final int CONTENT_COMPRESSION_ALGORITHM_ZLIB = 0;
+  private static final int CONTENT_COMPRESSION_ALGORITHM_HEADER_STRIPPING = 3;
   private static final int ID_CONTENT_COMPRESSION_ALGORITHM = 0x4254;
   private static final int ID_CONTENT_COMPRESSION_SETTINGS = 0x4255;
   private static final int ID_CONTENT_ENCRYPTION = 0x5035;
@@ -463,6 +467,8 @@ public class MatroskaExtractor implements Extractor {
   private final ParsableByteArray vorbisNumPageSamples;
   private final ParsableByteArray seekEntryIdBytes;
   private final ParsableByteArray sampleStrippedBytes;
+  private byte[] compressedSubtitleSample = new byte[0];
+  @Nullable private Inflater subtitleInflater;
   private final ParsableByteArray subtitleSample;
   private final ParsableByteArray encryptionInitializationVector;
   private final ParsableByteArray encryptionSubsampleData;
@@ -818,6 +824,10 @@ public class MatroskaExtractor implements Extractor {
       throws ParserException {
     assertInitialized();
     switch (id) {
+      case ID_CONTENT_COMPRESSION:
+        // The algorithm element is optional and defaults to zlib.
+        getCurrentTrack(id).contentCompressionAlgorithm = CONTENT_COMPRESSION_ALGORITHM_ZLIB;
+        break;
       case ID_SEGMENT:
         if (segmentContentPosition != C.INDEX_UNSET && segmentContentPosition != contentPosition) {
           throw ParserException.createForMalformedContainer(
@@ -1270,11 +1280,13 @@ public class MatroskaExtractor implements Extractor {
         }
         break;
       case ID_CONTENT_COMPRESSION_ALGORITHM:
-        // This extractor only supports header stripping.
-        if (value != 3) {
+        // This extractor only supports header stripping, and zlib for subtitle tracks.
+        if (value != CONTENT_COMPRESSION_ALGORITHM_HEADER_STRIPPING
+            && value != CONTENT_COMPRESSION_ALGORITHM_ZLIB) {
           throw ParserException.createForMalformedContainer(
               "ContentCompAlgo " + value + " not supported", /* cause= */ null);
         }
+        getCurrentTrack(id).contentCompressionAlgorithm = (int) value;
         break;
       case ID_CONTENT_ENCRYPTION_ALGORITHM:
         // Only the value 5 (AES) is allowed according to the WebM specification.
@@ -1848,13 +1860,13 @@ public class MatroskaExtractor implements Extractor {
   private int writeSampleData(ExtractorInput input, Track track, int size, boolean isBlockGroup)
       throws IOException {
     if (CODEC_ID_SUBRIP.equals(track.codecId)) {
-      writeSubtitleSampleData(input, SUBRIP_PREFIX, size);
+      writeSubtitleSampleData(input, track, SUBRIP_PREFIX, size);
       return finishWriteSampleData();
     } else if (CODEC_ID_ASS.equals(track.codecId) || CODEC_ID_SSA.equals(track.codecId)) {
-      writeSubtitleSampleData(input, SSA_PREFIX, size);
+      writeSubtitleSampleData(input, track, SSA_PREFIX, size);
       return finishWriteSampleData();
     } else if (CODEC_ID_VTT.equals(track.codecId)) {
-      writeSubtitleSampleData(input, VTT_PREFIX, size);
+      writeSubtitleSampleData(input, track, VTT_PREFIX, size);
       return finishWriteSampleData();
     }
 
@@ -2067,8 +2079,12 @@ public class MatroskaExtractor implements Extractor {
     sampleStrippedBytes.reset(/* limit= */ 0);
   }
 
-  private void writeSubtitleSampleData(ExtractorInput input, byte[] samplePrefix, int size)
-      throws IOException {
+  private void writeSubtitleSampleData(
+      ExtractorInput input, Track track, byte[] samplePrefix, int size) throws IOException {
+    if (track.contentCompressionAlgorithm == CONTENT_COMPRESSION_ALGORITHM_ZLIB) {
+      writeZlibSubtitleSampleData(input, samplePrefix, size);
+      return;
+    }
     int sizeWithPrefix = samplePrefix.length + size;
     if (subtitleSample.capacity() < sizeWithPrefix) {
       // Initialize subripSample to contain the required prefix and have space to hold a subtitle
@@ -2082,6 +2098,50 @@ public class MatroskaExtractor implements Extractor {
     subtitleSample.setLimit(sizeWithPrefix);
     // Defer writing the data to the track output. We need to modify the sample data by setting
     // the correct end timecode, which we might not have yet.
+  }
+
+  /** Same as {@link #writeSubtitleSampleData} for a zlib compressed block. */
+  private void writeZlibSubtitleSampleData(ExtractorInput input, byte[] samplePrefix, int size)
+      throws IOException {
+    if (compressedSubtitleSample.length < size) {
+      compressedSubtitleSample = new byte[size * 2];
+    }
+    input.readFully(compressedSubtitleSample, 0, size);
+
+    Inflater inflater = subtitleInflater;
+    if (inflater == null) {
+      inflater = subtitleInflater = new Inflater();
+    } else {
+      inflater.reset();
+    }
+    inflater.setInput(compressedSubtitleSample, 0, size);
+
+    int prefixLength = samplePrefix.length;
+    if (subtitleSample.capacity() < prefixLength + size * 4) {
+      subtitleSample.reset(Arrays.copyOf(samplePrefix, prefixLength + size * 4));
+    } else {
+      System.arraycopy(samplePrefix, 0, subtitleSample.getData(), 0, prefixLength);
+    }
+    int inflatedSize = 0;
+    try {
+      while (!inflater.finished()) {
+        byte[] data = subtitleSample.getData();
+        if (prefixLength + inflatedSize == data.length) {
+          byte[] grown = Arrays.copyOf(data, data.length * 2);
+          subtitleSample.reset(grown, grown.length);
+          data = grown;
+        }
+        int count = inflater.inflate(data, prefixLength + inflatedSize, data.length - prefixLength - inflatedSize);
+        if (count == 0 && (inflater.needsInput() || inflater.needsDictionary())) {
+          break;
+        }
+        inflatedSize += count;
+      }
+    } catch (DataFormatException e) {
+      throw ParserException.createForMalformedContainer("Invalid zlib subtitle block", e);
+    }
+    subtitleSample.setPosition(0);
+    subtitleSample.setLimit(prefixLength + inflatedSize);
   }
 
   /**
@@ -2397,6 +2457,7 @@ public class MatroskaExtractor implements Extractor {
     public int maxBlockAdditionId;
     private int blockAddIdType;
     public boolean hasContentEncryption;
+    public int contentCompressionAlgorithm = C.INDEX_UNSET;
     public byte @MonotonicNonNull [] sampleStrippedBytes;
     public TrackOutput.@MonotonicNonNull CryptoData cryptoData;
     public byte @MonotonicNonNull [] codecPrivate;
