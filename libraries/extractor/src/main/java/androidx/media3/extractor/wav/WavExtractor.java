@@ -60,6 +60,9 @@ public final class WavExtractor implements Extractor {
    */
   private static final int TARGET_SAMPLES_PER_SECOND = 10;
 
+  /** Microsoft ADPCM, not in {@link WavUtil} since media3-common isn't built from this fork. */
+  private static final int TYPE_MS_ADPCM = 0x0002;
+
   /** Factory for {@link WavExtractor} instances. */
   public static final ExtractorsFactory FACTORY = () -> new Extractor[] {new WavExtractor()};
 
@@ -178,6 +181,8 @@ public final class WavExtractor implements Extractor {
     WavFormat wavFormat = WavHeaderReader.readFormat(input);
     if (wavFormat.formatType == WavUtil.TYPE_IMA_ADPCM) {
       outputWriter = new ImaAdPcmOutputWriter(extractorOutput, trackOutput, wavFormat);
+    } else if (wavFormat.formatType == TYPE_MS_ADPCM) {
+      outputWriter = new MsAdPcmOutputWriter(extractorOutput, trackOutput, wavFormat);
     } else if (wavFormat.formatType == WavUtil.TYPE_ALAW) {
       outputWriter =
           new PassthroughOutputWriter(
@@ -385,27 +390,15 @@ public final class WavExtractor implements Extractor {
     }
   }
 
-  private static final class ImaAdPcmOutputWriter implements OutputWriter {
-
-    private static final int[] INDEX_TABLE = {
-      -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8
-    };
-
-    private static final int[] STEP_TABLE = {
-      7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
-      73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408,
-      449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
-      2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630,
-      9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
-      32767
-    };
+  /** Decodes ADPCM blocks into 16 bit PCM samples, subclasses decode one channel of a block. */
+  private abstract static class AdPcmOutputWriter implements OutputWriter {
 
     private final ExtractorOutput extractorOutput;
     private final TrackOutput trackOutput;
-    private final WavFormat wavFormat;
+    protected final WavFormat wavFormat;
 
     /** Number of frames per block of the input (yet to be decoded) data. */
-    private final int framesPerBlock;
+    protected final int framesPerBlock;
 
     /** Target for the input (yet to be decoded) data. */
     private final byte[] inputData;
@@ -438,32 +431,18 @@ public final class WavExtractor implements Extractor {
      */
     private long outputFrameCount;
 
-    public ImaAdPcmOutputWriter(
-        ExtractorOutput extractorOutput, TrackOutput trackOutput, WavFormat wavFormat)
-        throws ParserException {
+    protected AdPcmOutputWriter(
+        ExtractorOutput extractorOutput,
+        TrackOutput trackOutput,
+        WavFormat wavFormat,
+        int framesPerBlock) {
       this.extractorOutput = extractorOutput;
       this.trackOutput = trackOutput;
       this.wavFormat = wavFormat;
+      this.framesPerBlock = framesPerBlock;
       targetSampleSizeFrames = max(1, wavFormat.frameRateHz / TARGET_SAMPLES_PER_SECOND);
 
-      ParsableByteArray scratch = new ParsableByteArray(wavFormat.extraData);
-      scratch.readLittleEndianUnsignedShort();
-      framesPerBlock = scratch.readLittleEndianUnsignedShort();
-
       int numChannels = wavFormat.numChannels;
-      // Validate the WAV format. This calculation is defined in "Microsoft Multimedia Standards
-      // Update
-      // - New Multimedia Types and Data Techniques" (1994). See the "IMA ADPCM Wave Type" and "DVI
-      // ADPCM Wave Type" sections, and the calculation of wSamplesPerBlock in the latter.
-      int expectedFramesPerBlock =
-          (((wavFormat.blockSize - (4 * numChannels)) * 8)
-                  / (wavFormat.bitsPerSample * numChannels))
-              + 1;
-      if (framesPerBlock != expectedFramesPerBlock) {
-        throw ParserException.createForMalformedContainer(
-            "Expected frames per block: " + expectedFramesPerBlock + "; got: " + framesPerBlock,
-            /* cause= */ null);
-      }
 
       // Calculate the number of blocks we'll need to decode to obtain an output sample of the
       // target sample size, and allocate suitably sized buffers for input and decoded data.
@@ -571,7 +550,7 @@ public final class WavExtractor implements Extractor {
     }
 
     /**
-     * Decodes IMA ADPCM data to 16 bit PCM.
+     * Decodes ADPCM data to 16 bit PCM.
      *
      * @param input The input data to decode.
      * @param blockCount The number of blocks to decode.
@@ -588,7 +567,73 @@ public final class WavExtractor implements Extractor {
       output.setLimit(decodedDataSize);
     }
 
-    private void decodeBlockForChannel(
+    /** Writes the channel's {@link #framesPerBlock} samples of the block, interleaved. */
+    protected abstract void decodeBlockForChannel(
+        byte[] input, int blockIndex, int channelIndex, byte[] output);
+
+    protected static void writeSample(byte[] output, int outputIndex, int sample) {
+      output[outputIndex] = (byte) (sample & 0xFF);
+      output[outputIndex + 1] = (byte) (sample >> 8);
+    }
+
+    private int numOutputBytesToFrames(int bytes) {
+      return bytes / (2 * wavFormat.numChannels);
+    }
+
+    private int numOutputFramesToBytes(int frames) {
+      return numOutputFramesToBytes(frames, wavFormat.numChannels);
+    }
+
+    private static int numOutputFramesToBytes(int frames, int numChannels) {
+      return frames * 2 * numChannels;
+    }
+  }
+
+  private static final class ImaAdPcmOutputWriter extends AdPcmOutputWriter {
+
+    private static final int[] INDEX_TABLE = {
+      -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8
+    };
+
+    private static final int[] STEP_TABLE = {
+      7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
+      73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408,
+      449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+      2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630,
+      9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
+      32767
+    };
+
+    public ImaAdPcmOutputWriter(
+        ExtractorOutput extractorOutput, TrackOutput trackOutput, WavFormat wavFormat)
+        throws ParserException {
+      super(extractorOutput, trackOutput, wavFormat, readFramesPerBlock(wavFormat));
+    }
+
+    private static int readFramesPerBlock(WavFormat wavFormat) throws ParserException {
+      ParsableByteArray scratch = new ParsableByteArray(wavFormat.extraData);
+      scratch.readLittleEndianUnsignedShort();
+      int framesPerBlock = scratch.readLittleEndianUnsignedShort();
+
+      int numChannels = wavFormat.numChannels;
+      // Validate the WAV format. This calculation is defined in "Microsoft Multimedia Standards
+      // Update
+      // - New Multimedia Types and Data Techniques" (1994). See the "IMA ADPCM Wave Type" and "DVI
+      // ADPCM Wave Type" sections, and the calculation of wSamplesPerBlock in the latter.
+      int expectedFramesPerBlock =
+          (((wavFormat.blockSize - (4 * numChannels)) * 8)
+                  / (wavFormat.bitsPerSample * numChannels))
+              + 1;
+      if (framesPerBlock != expectedFramesPerBlock) {
+        throw ParserException.createForMalformedContainer(
+            "Expected frames per block: " + expectedFramesPerBlock + "; got: " + framesPerBlock,
+            /* cause= */ null);
+      }
+      return framesPerBlock;
+    }
+
+    @Override
+    protected void decodeBlockForChannel(
         byte[] input, int blockIndex, int channelIndex, byte[] output) {
       int blockSize = wavFormat.blockSize;
       int numChannels = wavFormat.numChannels;
@@ -614,8 +659,7 @@ public final class WavExtractor implements Extractor {
 
       // Output the initial 16 bit PCM sample from the header.
       int outputIndex = (blockIndex * framesPerBlock * numChannels + channelIndex) * 2;
-      output[outputIndex] = (byte) (predictedSample & 0xFF);
-      output[outputIndex + 1] = (byte) (predictedSample >> 8);
+      writeSample(output, outputIndex, predictedSample);
 
       // We examine each data byte twice during decode.
       for (int i = 0; i < dataSizeBytes * 2; i++) {
@@ -642,25 +686,126 @@ public final class WavExtractor implements Extractor {
 
         // Output the next 16 bit PCM sample to the correct position in the output.
         outputIndex += 2 * numChannels;
-        output[outputIndex] = (byte) (predictedSample & 0xFF);
-        output[outputIndex + 1] = (byte) (predictedSample >> 8);
+        writeSample(output, outputIndex, predictedSample);
 
         stepIndex += INDEX_TABLE[originalSample];
         stepIndex = Util.constrainValue(stepIndex, /* min= */ 0, /* max= */ STEP_TABLE.length - 1);
         step = STEP_TABLE[stepIndex];
       }
     }
+  }
 
-    private int numOutputBytesToFrames(int bytes) {
-      return bytes / (2 * wavFormat.numChannels);
+  // by claude
+  /**
+   * Microsoft ADPCM (format tag 0x0002), as described in "Microsoft Multimedia Standards Update -
+   * New Multimedia Types and Data Techniques" (1994).
+   *
+   * <p>Each block starts with a 7 byte header per channel, stored field by field across channels:
+   * the coefficient index, the initial delta, then the two newest samples (sample 1 is the more
+   * recent one, sample 2 is output first). The remaining bytes hold 4 bit codes, high nibble first,
+   * interleaved across channels.
+   */
+  private static final class MsAdPcmOutputWriter extends AdPcmOutputWriter {
+
+    private static final int[] ADAPTATION_TABLE = {
+      230, 230, 230, 230, 307, 409, 512, 614, 768, 614, 512, 409, 307, 230, 230, 230
+    };
+
+    private static final int[][] STANDARD_COEFFICIENTS = {
+      {256, 0}, {512, -256}, {0, 0}, {192, 64}, {240, 0}, {460, -208}, {392, -232}
+    };
+
+    private static final int HEADER_BYTES_PER_CHANNEL = 7;
+    private static final int MIN_DELTA = 16;
+
+    private final int[][] coefficients;
+
+    public MsAdPcmOutputWriter(
+        ExtractorOutput extractorOutput, TrackOutput trackOutput, WavFormat wavFormat)
+        throws ParserException {
+      super(extractorOutput, trackOutput, wavFormat, readFramesPerBlock(wavFormat));
+      coefficients = readCoefficients(wavFormat);
     }
 
-    private int numOutputFramesToBytes(int frames) {
-      return numOutputFramesToBytes(frames, wavFormat.numChannels);
+    /** Two samples live in the header, every following byte holds one code per nibble. */
+    private static int readFramesPerBlock(WavFormat wavFormat) throws ParserException {
+      int numChannels = wavFormat.numChannels;
+      int expectedFramesPerBlock =
+          (wavFormat.blockSize - HEADER_BYTES_PER_CHANNEL * numChannels) * 2 / numChannels + 2;
+      if (wavFormat.extraData.length >= 4) {
+        ParsableByteArray scratch = new ParsableByteArray(wavFormat.extraData);
+        scratch.readLittleEndianUnsignedShort();
+        int framesPerBlock = scratch.readLittleEndianUnsignedShort();
+        if (framesPerBlock > 0 && framesPerBlock <= expectedFramesPerBlock) {
+          return framesPerBlock;
+        }
+      }
+      if (expectedFramesPerBlock < 2) {
+        throw ParserException.createForMalformedContainer(
+            "Invalid MS ADPCM block size: " + wavFormat.blockSize, /* cause= */ null);
+      }
+      return expectedFramesPerBlock;
     }
 
-    private static int numOutputFramesToBytes(int frames, int numChannels) {
-      return frames * 2 * numChannels;
+    /** The coefficient pairs from the format, the 7 standard ones when the file has none. */
+    private static int[][] readCoefficients(WavFormat wavFormat) {
+      if (wavFormat.extraData.length < 6) {
+        return STANDARD_COEFFICIENTS;
+      }
+      ParsableByteArray scratch = new ParsableByteArray(wavFormat.extraData);
+      scratch.skipBytes(4);
+      int count = scratch.readLittleEndianUnsignedShort();
+      if (count == 0 || scratch.bytesLeft() < count * 4) {
+        return STANDARD_COEFFICIENTS;
+      }
+      int[][] coefficients = new int[count][2];
+      for (int i = 0; i < count; i++) {
+        coefficients[i][0] = (short) scratch.readLittleEndianUnsignedShort();
+        coefficients[i][1] = (short) scratch.readLittleEndianUnsignedShort();
+      }
+      return coefficients;
+    }
+
+    @Override
+    protected void decodeBlockForChannel(
+        byte[] input, int blockIndex, int channelIndex, byte[] output) {
+      int numChannels = wavFormat.numChannels;
+      int blockStartIndex = blockIndex * wavFormat.blockSize;
+
+      int coefficientIndex = input[blockStartIndex + channelIndex] & 0xFF;
+      int[] coefficient = coefficients[min(coefficientIndex, coefficients.length - 1)];
+      int delta = readShort(input, blockStartIndex + numChannels + channelIndex * 2);
+      int sample1 = readShort(input, blockStartIndex + numChannels * 3 + channelIndex * 2);
+      int sample2 = readShort(input, blockStartIndex + numChannels * 5 + channelIndex * 2);
+
+      int frameStride = 2 * numChannels;
+      int outputIndex = (blockIndex * framesPerBlock * numChannels + channelIndex) * 2;
+      writeSample(output, outputIndex, sample2);
+      outputIndex += frameStride;
+      writeSample(output, outputIndex, sample1);
+
+      int dataStartIndex = blockStartIndex + HEADER_BYTES_PER_CHANNEL * numChannels;
+      for (int frame = 2; frame < framesPerBlock; frame++) {
+        int nibbleIndex = (frame - 2) * numChannels + channelIndex;
+        int dataByte = input[dataStartIndex + nibbleIndex / 2] & 0xFF;
+        int code = nibbleIndex % 2 == 0 ? dataByte >> 4 : dataByte & 0x0F;
+        int signedCode = code >= 8 ? code - 16 : code;
+
+        int predictedSample = ((sample1 * coefficient[0]) + (sample2 * coefficient[1])) >> 8;
+        predictedSample += signedCode * delta;
+        predictedSample = Util.constrainValue(predictedSample, /* min= */ -32768, /* max= */ 32767);
+
+        outputIndex += frameStride;
+        writeSample(output, outputIndex, predictedSample);
+
+        sample2 = sample1;
+        sample1 = predictedSample;
+        delta = max(MIN_DELTA, (ADAPTATION_TABLE[code] * delta) >> 8);
+      }
+    }
+
+    private static int readShort(byte[] input, int index) {
+      return (short) (((input[index + 1] & 0xFF) << 8) | (input[index] & 0xFF));
     }
   }
 }
