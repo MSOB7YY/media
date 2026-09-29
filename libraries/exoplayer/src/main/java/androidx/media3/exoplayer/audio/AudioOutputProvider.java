@@ -671,6 +671,23 @@ public interface AudioOutputProvider {
   AudioOutput getAudioOutput(OutputConfig config) throws InitializationException;
 
   /**
+   * Returns the PCM encoding in which the linear PCM {@code formatConfig.format} can reach the
+   * output device without any mixing, resampling or processing, or {@link C#ENCODING_INVALID} if
+   * that is not possible.
+   *
+   * <p>The returned encoding must hold every sample of the input without loss, it may only differ
+   * from the input encoding by a wider integer container. When supported, the sink bypasses all
+   * audio processors and playback parameters for this format.
+   *
+   * @param formatConfig The {@link FormatConfig} of the PCM input.
+   * @return The bit-perfect output encoding, or {@link C#ENCODING_INVALID}.
+   */
+  @UnstableApi
+  default @C.PcmEncoding int getBitPerfectPcmEncoding(FormatConfig formatConfig) {
+    return C.ENCODING_INVALID;
+  }
+
+  /**
    * Adds a {@link Listener}.
    *
    * @param listener The listener to add.

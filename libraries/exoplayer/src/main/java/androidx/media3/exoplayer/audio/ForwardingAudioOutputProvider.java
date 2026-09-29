@@ -15,6 +15,7 @@
  */
 package androidx.media3.exoplayer.audio;
 
+import androidx.media3.common.C;
 import androidx.media3.common.util.Clock;
 import androidx.media3.common.util.UnstableApi;
 
@@ -45,6 +46,12 @@ public class ForwardingAudioOutputProvider implements AudioOutputProvider {
   @Override
   public AudioOutput getAudioOutput(OutputConfig config) throws InitializationException {
     return audioOutputProvider.getAudioOutput(config);
+  }
+
+  @UnstableApi
+  @Override
+  public @C.PcmEncoding int getBitPerfectPcmEncoding(FormatConfig formatConfig) {
+    return audioOutputProvider.getBitPerfectPcmEncoding(formatConfig);
   }
 
   @Override

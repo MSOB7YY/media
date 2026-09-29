@@ -35,7 +35,7 @@ import java.nio.ByteBuffer;
 
 /**
  * An {@link AudioProcessor} that skips silence in the input stream. Input and output are 16-bit
- * PCM.
+ * or float PCM.
  */
 @UnstableApi
 public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
@@ -146,7 +146,9 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
    */
   private final long maxSilenceToKeepDurationUs;
 
+  private int bytesPerSample;
   private int bytesPerFrame;
+  private boolean isFloat;
   private boolean enabled;
   private @State int state;
   private long skippedFrames;
@@ -261,7 +263,8 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
   @Override
   protected AudioFormat onConfigure(AudioFormat inputAudioFormat)
       throws UnhandledAudioFormatException {
-    if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
+    if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT
+        && inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT) {
       throw new UnhandledAudioFormatException(inputAudioFormat);
     }
     if (inputAudioFormat.sampleRate == Format.NO_VALUE) {
@@ -306,7 +309,9 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
   @Override
   public void onFlush(StreamMetadata streamMetadata) {
     if (isActive()) {
-      bytesPerFrame = inputAudioFormat.channelCount * 2;
+      isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT;
+      bytesPerSample = isFloat ? 4 : 2;
+      bytesPerFrame = inputAudioFormat.channelCount * bytesPerSample;
       // Divide by 2 to allow the buffer to be split into two bytesPerFrame aligned parts.
       int maybeSilenceBufferSize =
           alignToBytePerFrameBoundary(durationUsToFrames(minimumSilenceDurationUs) / 2) * 2;
@@ -647,11 +652,7 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
       return;
     }
 
-    for (int idx = 0; idx < size; idx += 2) {
-      byte mostSignificantByte = sampleBuffer[idx + 1];
-      byte leastSignificantByte = sampleBuffer[idx];
-      int sample = twoByteSampleToInt(mostSignificantByte, leastSignificantByte);
-
+    for (int idx = 0; idx < size; idx += bytesPerSample) {
       int volumeModificationPercentage;
       if (volumeChangeType == FADE_OUT) {
         volumeModificationPercentage =
@@ -663,8 +664,14 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
         volumeModificationPercentage = minVolumeToKeepPercentageWhenMuting;
       }
 
-      sample = (sample * volumeModificationPercentage) / 100;
-      sampleIntToTwoBigEndianBytes(sampleBuffer, idx, sample);
+      if (isFloat) {
+        float sample = fourByteSampleToFloat(sampleBuffer, idx);
+        floatSampleToFourBytes(sampleBuffer, idx, sample * volumeModificationPercentage / 100f);
+      } else {
+        int sample = twoByteSampleToInt(sampleBuffer[idx + 1], sampleBuffer[idx]);
+        sample = (sample * volumeModificationPercentage) / 100;
+        sampleIntToTwoBigEndianBytes(sampleBuffer, idx, sample);
+      }
     }
   }
 
@@ -678,6 +685,23 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
     return (minVolumeToKeepPercentageWhenMuting
         + ((100 - minVolumeToKeepPercentageWhenMuting) * (AVOID_TRUNCATION_FACTOR * value) / max)
             / AVOID_TRUNCATION_FACTOR);
+  }
+
+  private static float fourByteSampleToFloat(byte[] byteArray, int startIndex) {
+    return Float.intBitsToFloat(
+        (byteArray[startIndex] & 0xFF)
+            | ((byteArray[startIndex + 1] & 0xFF) << 8)
+            | ((byteArray[startIndex + 2] & 0xFF) << 16)
+            | (byteArray[startIndex + 3] << 24));
+  }
+
+  /** Writes {@code sample} as little-endian float bytes into {@code byteArray}. */
+  private static void floatSampleToFourBytes(byte[] byteArray, int startIndex, float sample) {
+    int bits = Float.floatToRawIntBits(sample);
+    byteArray[startIndex] = (byte) bits;
+    byteArray[startIndex + 1] = (byte) (bits >> 8);
+    byteArray[startIndex + 2] = (byte) (bits >> 16);
+    byteArray[startIndex + 3] = (byte) (bits >> 24);
   }
 
   private static int twoByteSampleToInt(byte mostSignificantByte, byte leastSignificantByte) {
@@ -720,6 +744,15 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
    * classified as a noisy frame, or the limit of the buffer if no such frame exists.
    */
   private int findNoisePosition(ByteBuffer buffer) {
+    if (isFloat) {
+      for (int i = buffer.position(); i < buffer.limit(); i += 4) {
+        if (isNoise(buffer.getFloat(i))) {
+          // Round to the start of the frame.
+          return bytesPerFrame * (i / bytesPerFrame);
+        }
+      }
+      return buffer.limit();
+    }
     // The input is in ByteOrder.nativeOrder(), which is little endian on Android.
     for (int i = buffer.position() + 1; i < buffer.limit(); i += 2) {
       if (isNoise(buffer.get(i), buffer.get(i - 1))) {
@@ -735,6 +768,15 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
    * from the byte position to the limit are classified as silent.
    */
   private int findNoiseLimit(ByteBuffer buffer) {
+    if (isFloat) {
+      for (int i = buffer.limit() - 4; i >= buffer.position(); i -= 4) {
+        if (isNoise(buffer.getFloat(i))) {
+          // Return the start of the next frame.
+          return bytesPerFrame * (i / bytesPerFrame) + bytesPerFrame;
+        }
+      }
+      return buffer.position();
+    }
     // The input is in ByteOrder.nativeOrder(), which is little endian on Android.
     for (int i = buffer.limit() - 1; i >= buffer.position(); i -= 2) {
       if (isNoise(buffer.get(i), buffer.get(i - 1))) {
@@ -752,5 +794,10 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
   private boolean isNoise(byte mostSignificantByte, byte leastSignificantByte) {
     return Math.abs(twoByteSampleToInt(mostSignificantByte, leastSignificantByte))
         > silenceThresholdLevel;
+  }
+
+  /** Whether the given float PCM value is louder than {@link #silenceThresholdLevel}. */
+  private boolean isNoise(float sample) {
+    return Math.abs(sample) * 32768f > silenceThresholdLevel;
   }
 }

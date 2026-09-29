@@ -357,10 +357,9 @@ public final class DefaultAudioSink implements AudioSink {
     }
 
     /**
-     * Sets whether to enable 32-bit float output or integer output. Where possible, 32-bit float
-     * output will be used if the input is 32-bit float, and also if the input is high resolution
-     * (24-bit or 32-bit) integer PCM. Audio processing (for example, speed adjustment) will not be
-     * available when float output is in use.
+     * Sets whether to enable 32-bit float output or integer output. When enabled, all PCM input is
+     * converted to 32-bit float before the audio processors, so high resolution input keeps its
+     * precision and every processor in the {@link AudioProcessorChain} must accept float PCM.
      *
      * <p>The default value is {@code false}.
      */
@@ -571,6 +570,7 @@ public final class DefaultAudioSink implements AudioSink {
   private final TrimmingAudioProcessor trimmingAudioProcessor;
   private final ToInt16PcmAudioProcessor toInt16PcmAudioProcessor;
   private final ToFloatPcmAudioProcessor toFloatPcmAudioProcessor;
+  private final BitPerfectPcmAudioProcessor bitPerfectPcmAudioProcessor;
   private final ImmutableList<AudioProcessor> availableAudioProcessors;
   private final ArrayDeque<MediaPositionParameters> mediaPositionParametersCheckpoints;
   private final boolean preferAudioOutputPlaybackParameters;
@@ -642,6 +642,7 @@ public final class DefaultAudioSink implements AudioSink {
     trimmingAudioProcessor = new TrimmingAudioProcessor();
     toInt16PcmAudioProcessor = new ToInt16PcmAudioProcessor();
     toFloatPcmAudioProcessor = new ToFloatPcmAudioProcessor();
+    bitPerfectPcmAudioProcessor = new BitPerfectPcmAudioProcessor();
     availableAudioProcessors =
         ImmutableList.of(trimmingAudioProcessor, channelMappingAudioProcessor);
     volume = 1f;
@@ -746,15 +747,25 @@ public final class DefaultAudioSink implements AudioSink {
     maybeAddAudioOutputProviderListener();
 
     Format inputFormat = audioSinkConfig.format;
+    boolean isBitPerfect = false;
     if (MimeTypes.AUDIO_RAW.equals(inputFormat.sampleMimeType)) {
       checkArgument(Util.isEncodingLinearPcm(inputFormat.pcmEncoding));
 
       inputPcmFrameSize = Util.getPcmFrameSize(inputFormat.pcmEncoding, inputFormat.channelCount);
 
+      @C.PcmEncoding
+      int bitPerfectEncoding =
+          audioOutputProvider.getBitPerfectPcmEncoding(getFormatConfig(inputFormat));
+      isBitPerfect = bitPerfectEncoding != C.ENCODING_INVALID;
+
       ImmutableList.Builder<AudioProcessor> pipelineProcessors = new ImmutableList.Builder<>();
       pipelineProcessors.addAll(availableAudioProcessors);
-      if (shouldUseFloatOutput(inputFormat.pcmEncoding)) {
+      if (isBitPerfect) {
+        bitPerfectPcmAudioProcessor.setOutputEncoding(bitPerfectEncoding);
+        pipelineProcessors.add(bitPerfectPcmAudioProcessor);
+      } else if (shouldUseFloatOutput(inputFormat.pcmEncoding)) {
         pipelineProcessors.add(toFloatPcmAudioProcessor);
+        pipelineProcessors.add(audioProcessorChain.getAudioProcessors());
       } else {
         pipelineProcessors.add(toInt16PcmAudioProcessor);
         pipelineProcessors.add(audioProcessorChain.getAudioProcessors());
@@ -831,6 +842,7 @@ public final class DefaultAudioSink implements AudioSink {
             outputPcmFrameSize,
             outputConfig,
             audioProcessingPipeline,
+            isBitPerfect,
             audioSinkConfig.timeline,
             audioSinkConfig.mediaPeriodId != null ? audioSinkConfig.mediaPeriodId.periodUid : null);
     if (isAudioOutputInitialized()) {
@@ -1596,6 +1608,7 @@ public final class DefaultAudioSink implements AudioSink {
     }
     toInt16PcmAudioProcessor.reset();
     toFloatPcmAudioProcessor.reset();
+    bitPerfectPcmAudioProcessor.reset();
 
     if (audioProcessingPipeline != null) {
       audioProcessingPipeline.reset();
@@ -1716,10 +1729,8 @@ public final class DefaultAudioSink implements AudioSink {
     //   https://github.com/google/ExoPlayer/issues/4803);
     // - when playing encoded audio via passthrough/offload, because modifying the audio stream
     //   would require decoding/re-encoding; and
-    // - when outputting float PCM audio, because SonicAudioProcessor outputs 16-bit integer PCM.
-    return !tunneling
-        && configuration.isPcm()
-        && !shouldUseFloatOutput(configuration.inputFormat.pcmEncoding);
+    // - when playing bit-perfect, because the samples must reach the output unchanged.
+    return !tunneling && configuration.isPcm() && !configuration.isBitPerfect;
   }
 
   private boolean useAudioOutputPlaybackParams() {
@@ -1731,7 +1742,7 @@ public final class DefaultAudioSink implements AudioSink {
    * float PCM.
    */
   private boolean shouldUseFloatOutput(@C.PcmEncoding int pcmEncoding) {
-    return enableFloatOutput && Util.isEncodingHighResolutionPcm(pcmEncoding);
+    return enableFloatOutput && Util.isEncodingLinearPcm(pcmEncoding);
   }
 
   /**
@@ -2074,6 +2085,7 @@ public final class DefaultAudioSink implements AudioSink {
     private final int outputPcmFrameSize;
     private final OutputConfig outputConfig;
     private final AudioProcessingPipeline audioProcessingPipeline;
+    private final boolean isBitPerfect;
     private final Timeline timeline;
     @Nullable private final Object periodUid;
 
@@ -2084,6 +2096,7 @@ public final class DefaultAudioSink implements AudioSink {
         int outputPcmFrameSize,
         OutputConfig outputConfig,
         AudioProcessingPipeline audioProcessingPipeline,
+        boolean isBitPerfect,
         Timeline timeline,
         @Nullable Object periodUid) {
       this.inputFormat = inputFormat;
@@ -2092,6 +2105,7 @@ public final class DefaultAudioSink implements AudioSink {
       this.outputPcmFrameSize = outputPcmFrameSize;
       this.outputConfig = outputConfig;
       this.audioProcessingPipeline = audioProcessingPipeline;
+      this.isBitPerfect = isBitPerfect;
       this.timeline = timeline;
       this.periodUid = periodUid;
     }
@@ -2104,6 +2118,7 @@ public final class DefaultAudioSink implements AudioSink {
           outputPcmFrameSize,
           outputConfig,
           audioProcessingPipeline,
+          isBitPerfect,
           timeline,
           periodUid);
     }
