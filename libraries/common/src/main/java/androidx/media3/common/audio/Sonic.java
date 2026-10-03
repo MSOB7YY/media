@@ -69,6 +69,7 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 
   private int prevPeriod;
   private double accumulatedSpeedAdjustmentError;
+  private boolean endOfStreamQueued;
 
   /**
    * Returns the estimated output frame count for a given configuration and input frame count.
@@ -275,6 +276,12 @@ import org.checkerframework.checker.nullness.qual.NonNull;
    * added to the output, but flushing in the middle of words could introduce distortion.
    */
   public void queueEndOfStream() {
+    // AudioProcessingPipeline re-issues end of stream on every pass until ended, a repeated call
+    // must not add output again or the stream never ends.
+    if (endOfStreamQueued) {
+      return;
+    }
+    endOfStreamQueued = true;
     int remainingFrameCount = inputFrameCount;
     double s = speed / pitch;
     double r = rate * pitch;
@@ -323,6 +330,7 @@ import org.checkerframework.checker.nullness.qual.NonNull;
     remainingInputToCopyFrameCount = 0;
     prevPeriod = 0;
     accumulatedSpeedAdjustmentError = 0;
+    endOfStreamQueued = false;
     impl.flush();
   }
 
