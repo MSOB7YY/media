@@ -126,6 +126,9 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
   /** Absolute level below which an individual PCM sample is classified as silent. */
   private final short silenceThresholdLevel;
 
+  /** {@link #silenceThresholdLevel} on the float PCM scale. */
+  private final float floatSilenceThresholdLevel;
+
   /**
    * Volume percentage to keep. Even when modifying the volume to a mute state, it is ideal to
    * decrease the volume instead of making the volume zero. Completely silent audio sounds like
@@ -237,6 +240,7 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
     this.maxSilenceToKeepDurationUs = maxSilenceToKeepDurationUs;
     this.minVolumeToKeepPercentageWhenMuting = minVolumeToKeepPercentageWhenMuting;
     this.silenceThresholdLevel = silenceThresholdLevel;
+    floatSilenceThresholdLevel = silenceThresholdLevel / 32768f;
     maybeSilenceBuffer = Util.EMPTY_BYTE_ARRAY;
     contiguousOutputBuffer = Util.EMPTY_BYTE_ARRAY;
   }
@@ -312,9 +316,10 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
       isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT;
       bytesPerSample = isFloat ? 4 : 2;
       bytesPerFrame = inputAudioFormat.channelCount * bytesPerSample;
-      // Divide by 2 to allow the buffer to be split into two bytesPerFrame aligned parts.
+      // Divide by 2 to allow the buffer to be split into two bytesPerFrame aligned parts. Sized in
+      // bytes, upstream passes frames as bytes, which shortens the minimum silence by the frame size.
       int maybeSilenceBufferSize =
-          alignToBytePerFrameBoundary(durationUsToFrames(minimumSilenceDurationUs) / 2) * 2;
+          durationUsToFrames(minimumSilenceDurationUs) / 2 * bytesPerFrame * 2;
       if (maybeSilenceBuffer.length != maybeSilenceBufferSize) {
         maybeSilenceBuffer = new byte[maybeSilenceBufferSize];
         contiguousOutputBuffer = new byte[maybeSilenceBufferSize];
@@ -798,6 +803,6 @@ public final class SilenceSkippingAudioProcessor extends BaseAudioProcessor {
 
   /** Whether the given float PCM value is louder than {@link #silenceThresholdLevel}. */
   private boolean isNoise(float sample) {
-    return Math.abs(sample) * 32768f > silenceThresholdLevel;
+    return Math.abs(sample) > floatSilenceThresholdLevel;
   }
 }
