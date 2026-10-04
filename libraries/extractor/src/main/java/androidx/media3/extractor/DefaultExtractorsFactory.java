@@ -29,6 +29,7 @@ import androidx.media3.common.Player;
 import androidx.media3.common.util.TimestampAdjuster;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.extractor.amr.AmrExtractor;
+import androidx.media3.extractor.ape.ApeExtractor;
 import androidx.media3.extractor.avi.AviExtractor;
 import androidx.media3.extractor.avif.AvifExtractor;
 import androidx.media3.extractor.bmp.BmpExtractor;
@@ -52,6 +53,7 @@ import androidx.media3.extractor.ts.PsExtractor;
 import androidx.media3.extractor.ts.TsExtractor;
 import androidx.media3.extractor.ts.TsPayloadReader;
 import androidx.media3.extractor.wav.WavExtractor;
+import androidx.media3.extractor.wavpack.WavPackExtractor;
 import androidx.media3.extractor.webp.WebpExtractor;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
@@ -129,7 +131,9 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         FileTypes.WEBP,
         FileTypes.BMP,
         FileTypes.HEIF,
-        FileTypes.AVIF
+        FileTypes.AVIF,
+        FileTypes.WAVPACK,
+        FileTypes.APE
       };
 
   private static final ExtensionLoader FLAC_EXTENSION_LOADER =
@@ -612,6 +616,12 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         break;
       case FileTypes.AVIF:
         extractors.add(new AvifExtractor());
+        break;
+      case FileTypes.WAVPACK:
+        extractors.add(new WavPackExtractor());
+        break;
+      case FileTypes.APE:
+        extractors.add(new ApeExtractor());
         break;
       case FileTypes.WEBVTT:
       case FileTypes.UNKNOWN:

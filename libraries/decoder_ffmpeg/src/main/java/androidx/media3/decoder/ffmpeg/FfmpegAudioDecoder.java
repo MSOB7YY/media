@@ -74,8 +74,19 @@ public final class FfmpegAudioDecoder
     encoding = outputFloat ? C.ENCODING_PCM_FLOAT : C.ENCODING_PCM_16BIT;
     outputBufferSize =
         outputFloat ? INITIAL_OUTPUT_BUFFER_SIZE_32BIT : INITIAL_OUTPUT_BUFFER_SIZE_16BIT;
+    // Lossless formats carry the depth they were stored in, the APE decoder can't start without it.
+    int bitsPerSample =
+        format.pcmEncoding == Format.NO_VALUE
+            ? Format.NO_VALUE
+            : Util.getByteDepth(format.pcmEncoding) * C.BITS_PER_BYTE;
     nativeContext =
-        ffmpegInitialize(codecName, extraData, outputFloat, format.sampleRate, format.channelCount);
+        ffmpegInitialize(
+            codecName,
+            extraData,
+            outputFloat,
+            format.sampleRate,
+            format.channelCount,
+            bitsPerSample);
     if (nativeContext == 0) {
       throw new FfmpegDecoderException("Initialization failed.");
     }
@@ -193,6 +204,7 @@ public final class FfmpegAudioDecoder
     switch (mimeType) {
       case MimeTypes.AUDIO_AAC:
       case MimeTypes.AUDIO_OPUS:
+      case MimeTypes.AUDIO_APE:
         return initializationData.get(0);
       case MimeTypes.AUDIO_ALAC:
         return getAlacExtraData(initializationData);
@@ -302,7 +314,8 @@ public final class FfmpegAudioDecoder
       @Nullable byte[] extraData,
       boolean outputFloat,
       int rawSampleRate,
-      int rawChannelCount);
+      int rawChannelCount,
+      int bitsPerSample);
 
   private native int ffmpegDecode(
       long context,

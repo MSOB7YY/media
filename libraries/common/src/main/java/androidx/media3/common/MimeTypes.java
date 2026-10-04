@@ -109,6 +109,8 @@ public final class MimeTypes {
   public static final String AUDIO_AMR_WB = BASE_TYPE_AUDIO + "/amr-wb";
   public static final String AUDIO_FLAC = BASE_TYPE_AUDIO + "/flac";
   public static final String AUDIO_ALAC = BASE_TYPE_AUDIO + "/alac";
+  @UnstableApi public static final String AUDIO_WAVPACK = BASE_TYPE_AUDIO + "/x-wavpack";
+  @UnstableApi public static final String AUDIO_APE = BASE_TYPE_AUDIO + "/x-ape";
   public static final String AUDIO_MSGSM = BASE_TYPE_AUDIO + "/gsm";
   public static final String AUDIO_OGG = BASE_TYPE_AUDIO + "/ogg";
   public static final String AUDIO_WAV = BASE_TYPE_AUDIO + "/wav";
@@ -309,6 +311,8 @@ public final class MimeTypes {
       case AUDIO_ALAW:
       case AUDIO_MLAW:
       case AUDIO_FLAC:
+      case AUDIO_WAVPACK:
+      case AUDIO_APE:
       case AUDIO_AC3:
       case AUDIO_E_AC3:
       case AUDIO_E_AC3_JOC:

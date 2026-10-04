@@ -108,7 +108,8 @@ const AVCodec* getCodecByName(JNIEnv* env, jstring codecName);
  */
 AVCodecContext* createContext(JNIEnv* env, const AVCodec* codec,
                               jbyteArray extraData, jboolean outputFloat,
-                              jint rawSampleRate, jint rawChannelCount);
+                              jint rawSampleRate, jint rawChannelCount,
+                              jint bitsPerSample);
 
 struct GrowOutputBufferCallback {
   uint8_t* operator()(int requiredSize) const;
@@ -166,14 +167,15 @@ jstring ffmpegGetAv1DecoderName(JNIEnv* env, jobject thiz) {
 
 jlong ffmpegInitialize(JNIEnv* env, jobject thiz, jstring codecName,
                        jbyteArray extraData, jboolean outputFloat,
-                       jint rawSampleRate, jint rawChannelCount) {
+                       jint rawSampleRate, jint rawChannelCount,
+                       jint bitsPerSample) {
   const AVCodec* codec = getCodecByName(env, codecName);
   if (!codec) {
     LOGE("Codec not found.");
     return 0L;
   }
   return (jlong)createContext(env, codec, extraData, outputFloat, rawSampleRate,
-                              rawChannelCount);
+                              rawChannelCount, bitsPerSample);
 }
 
 jint ffmpegDecode(JNIEnv* env, jobject thiz, jlong context, jobject inputData,
@@ -260,7 +262,8 @@ jlong ffmpegReset(JNIEnv* env, jobject thiz, jlong jContext,
     }
     return (jlong)createContext(env, codec, extraData, outputFloat,
                                 /* rawSampleRate= */ -1,
-                                /* rawChannelCount= */ -1);
+                                /* rawChannelCount= */ -1,
+                                /* bitsPerSample= */ -1);
   }
 
   avcodec_flush_buffers(context);
@@ -285,7 +288,8 @@ const AVCodec* getCodecByName(JNIEnv* env, jstring codecName) {
 
 AVCodecContext* createContext(JNIEnv* env, const AVCodec* codec,
                               jbyteArray extraData, jboolean outputFloat,
-                              jint rawSampleRate, jint rawChannelCount) {
+                              jint rawSampleRate, jint rawChannelCount,
+                              jint bitsPerSample) {
   AVCodecContext* context = avcodec_alloc_context3(codec);
   if (!context) {
     LOGE("Failed to allocate context.");
@@ -309,6 +313,12 @@ AVCodecContext* createContext(JNIEnv* env, const AVCodec* codec,
       context->codec_id == AV_CODEC_ID_PCM_ALAW) {
     context->sample_rate = rawSampleRate;
     av_channel_layout_default(&context->ch_layout, rawChannelCount);
+  }
+  // APE frames don't describe the stream, only the container header does.
+  if (context->codec_id == AV_CODEC_ID_APE) {
+    context->sample_rate = rawSampleRate;
+    av_channel_layout_default(&context->ch_layout, rawChannelCount);
+    context->bits_per_coded_sample = bitsPerSample;
   }
   context->err_recognition = AV_EF_IGNORE_ERR;
   int result = avcodec_open2(context, codec, NULL);
@@ -1025,7 +1035,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     return -1;
   }
   static const JNINativeMethod kFfmpegAudioDecoderMethods[] = {
-      {"ffmpegInitialize", "(Ljava/lang/String;[BZII)J",
+      {"ffmpegInitialize", "(Ljava/lang/String;[BZIII)J",
        reinterpret_cast<void*>(ffmpegInitialize)},
       {"ffmpegDecode",
        "(JLjava/nio/ByteBuffer;ILandroidx/media3/decoder/"

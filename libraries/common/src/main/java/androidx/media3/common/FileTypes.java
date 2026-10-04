@@ -59,6 +59,8 @@ public final class FileTypes {
    *   <li>{@link #BMP}
    *   <li>{@link #HEIF}
    *   <li>{@link #AVIF}
+   *   <li>{@link #WAVPACK}
+   *   <li>{@link #APE}
    * </ul>
    */
   @Documented
@@ -66,7 +68,7 @@ public final class FileTypes {
   @Target(TYPE_USE)
   @IntDef({
     UNKNOWN, AC3, AC4, ADTS, AMR, FLAC, FLV, MATROSKA, MP3, MP4, OGG, PS, TS, WAV, WEBVTT, JPEG,
-    MIDI, AVI, PNG, WEBP, BMP, HEIF, AVIF
+    MIDI, AVI, PNG, WEBP, BMP, HEIF, AVIF, WAVPACK, APE
   })
   public @interface Type {}
 
@@ -139,6 +141,12 @@ public final class FileTypes {
   /** File type for the AVIF format. */
   public static final int AVIF = 21;
 
+  /** File type for the WavPack format. */
+  public static final int WAVPACK = 22;
+
+  /** File type for the Monkey's Audio (APE) format. */
+  public static final int APE = 23;
+
   @VisibleForTesting /* package */ static final String HEADER_CONTENT_TYPE = "Content-Type";
 
   private static final String EXTENSION_AC3 = ".ac3";
@@ -181,6 +189,8 @@ public final class FileTypes {
   private static final String EXTENSION_HEIC = ".heic";
   private static final String EXTENSION_HEIF = ".heif";
   private static final String EXTENSION_AVIF = ".avif";
+  private static final String EXTENSION_WAVPACK = ".wv";
+  private static final String EXTENSION_APE = ".ape";
 
   private FileTypes() {}
 
@@ -257,6 +267,10 @@ public final class FileTypes {
         return FileTypes.HEIF;
       case MimeTypes.IMAGE_AVIF:
         return FileTypes.AVIF;
+      case MimeTypes.AUDIO_WAVPACK:
+        return FileTypes.WAVPACK;
+      case MimeTypes.AUDIO_APE:
+        return FileTypes.APE;
       default:
         return FileTypes.UNKNOWN;
     }
@@ -334,6 +348,10 @@ public final class FileTypes {
       return FileTypes.HEIF;
     } else if (filename.endsWith(EXTENSION_AVIF)) {
       return FileTypes.AVIF;
+    } else if (filename.endsWith(EXTENSION_WAVPACK)) {
+      return FileTypes.WAVPACK;
+    } else if (filename.endsWith(EXTENSION_APE)) {
+      return FileTypes.APE;
     } else {
       return FileTypes.UNKNOWN;
     }
