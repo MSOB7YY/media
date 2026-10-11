@@ -95,6 +95,8 @@ class FLACParser {
     if (mDecoder != NULL) {
       mCurrentPos = newPosition;
       mEOF = false;
+      mPendingWrites.clear();
+      mNextPendingWrite = 0;
       if (newPosition == 0) {
         mStreamInfoValid = false;
         mVorbisCommentsValid = false;
@@ -156,9 +158,16 @@ class FLACParser {
 
   // cached when a decoded PCM block is "written" by libFLAC parser
   bool mWriteRequested;
-  bool mWriteCompleted;
   FLAC__FrameHeader mWriteHeader;
-  const FLAC__int32 *const *mWriteBuffer;
+
+  // libFLAC replaces frames lost to corruption with silence, written right
+  // before the next decoded frame within the same process_single call
+  struct PendingWrite {
+    FLAC__FrameHeader header;
+    const FLAC__int32 *const *buffer;  // NULL for silence
+  };
+  std::vector<PendingWrite> mPendingWrites;
+  size_t mNextPendingWrite;
 
   // most recent error reported by libFLAC parser
   FLAC__StreamDecoderErrorStatus mErrorStatus;

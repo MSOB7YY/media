@@ -123,11 +123,11 @@ FLAC__StreamDecoderReadStatus FLACParser::readCallback(FLAC__byte buffer[],
   }
 }
 
+// The data source can't seek, libFLAC resyncs from the current position after
+// corruption instead of rewinding.
 FLAC__StreamDecoderSeekStatus FLACParser::seekCallback(
-    FLAC__uint64 absolute_byte_offset) {
-  mCurrentPos = absolute_byte_offset;
-  mEOF = false;
-  return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
+    FLAC__uint64 /* absolute_byte_offset */) {
+  return FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED;
 }
 
 FLAC__StreamDecoderTellStatus FLACParser::tellCallback(
@@ -145,17 +145,16 @@ FLAC__bool FLACParser::eofCallback() { return mEOF; }
 
 FLAC__StreamDecoderWriteStatus FLACParser::writeCallback(
     const FLAC__Frame* frame, const FLAC__int32* const buffer[]) {
-  if (mWriteRequested) {
-    mWriteRequested = false;
-    // FLAC parser doesn't free or realloc buffer until next frame or finish
-    mWriteHeader = frame->header;
-    mWriteBuffer = buffer;
-    mWriteCompleted = true;
-    return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
-  } else {
+  if (!mWriteRequested) {
     ALOGE("FLACParser::writeCallback unexpected");
     return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
   }
+  // Only the last write's buffer outlives process_single.
+  if (!mPendingWrites.empty()) {
+    mPendingWrites.back().buffer = NULL;
+  }
+  mPendingWrites.push_back({frame->header, buffer});
+  return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
 
 void FLACParser::metadataCallback(const FLAC__StreamMetadata* metadata) {
@@ -272,8 +271,7 @@ FLACParser::FLACParser(DataSource* source)
       mVorbisCommentsValid(false),
       mPicturesValid(false),
       mWriteRequested(false),
-      mWriteCompleted(false),
-      mWriteBuffer(NULL),
+      mNextPendingWrite(0),
       mErrorStatus((FLAC__StreamDecoderErrorStatus)-1) {
   ALOGV("FLACParser::FLACParser");
   memset(&mStreamInfo, 0, sizeof(mStreamInfo));
@@ -362,22 +360,29 @@ bool FLACParser::decodeMetadata() {
 }
 
 size_t FLACParser::readBuffer(void* output, size_t output_size) {
-  mWriteRequested = true;
-  mWriteCompleted = false;
-
-  if (!FLAC__stream_decoder_process_single(mDecoder)) {
-    ALOGE("FLACParser::readBuffer process_single failed. Status: %s",
-          getDecoderStateString());
-    return -1;
-  }
-  if (!mWriteCompleted) {
-    if (FLAC__stream_decoder_get_state(mDecoder) !=
-        FLAC__STREAM_DECODER_END_OF_STREAM) {
-      ALOGE("FLACParser::readBuffer write did not complete. Status: %s",
+  if (mNextPendingWrite == mPendingWrites.size()) {
+    mPendingWrites.clear();
+    mNextPendingWrite = 0;
+    mWriteRequested = true;
+    const bool processed = FLAC__stream_decoder_process_single(mDecoder);
+    mWriteRequested = false;
+    if (!processed) {
+      mPendingWrites.clear();
+      ALOGE("FLACParser::readBuffer process_single failed. Status: %s",
             getDecoderStateString());
+      return -1;
     }
-    return -1;
+    if (mPendingWrites.empty()) {
+      if (FLAC__stream_decoder_get_state(mDecoder) !=
+          FLAC__STREAM_DECODER_END_OF_STREAM) {
+        ALOGE("FLACParser::readBuffer write did not complete. Status: %s",
+              getDecoderStateString());
+      }
+      return -1;
+    }
   }
+  const PendingWrite& write = mPendingWrites[mNextPendingWrite++];
+  mWriteHeader = write.header;
 
   // verify that block header keeps the promises made by STREAMINFO
   unsigned blocksize = mWriteHeader.blocksize;
@@ -408,8 +413,12 @@ size_t FLACParser::readBuffer(void* output, size_t output_size) {
   }
 
   // copy PCM from FLAC write buffer to our media buffer, with interleaving.
-  (*mCopy)(reinterpret_cast<int8_t*>(output), mWriteBuffer, bytesPerSample,
-           blocksize, getChannels());
+  if (write.buffer == NULL) {
+    memset(output, 0, bufferSize);
+  } else {
+    (*mCopy)(reinterpret_cast<int8_t*>(output), write.buffer, bytesPerSample,
+             blocksize, getChannels());
+  }
 
   // fill in buffer metadata
   CHECK(mWriteHeader.number_type == FLAC__FRAME_NUMBER_TYPE_SAMPLE_NUMBER);
