@@ -722,6 +722,12 @@ public class FragmentedMp4Extractor implements Extractor {
       this.atomData = atomData;
       parserState = STATE_READING_ATOM_PAYLOAD;
     } else {
+      if (containerAtoms.isEmpty()
+          && input.getLength() != C.LENGTH_UNSET
+          && atomPosition + atomSize > input.getLength()) {
+        // A top level atom cut off by the end of the input is trailing data, like an ID3v1 tag.
+        return false;
+      }
       if (atomSize > Integer.MAX_VALUE) {
         throw ParserException.createForUnsupportedContainerFeature(
             "Skipping atom with length > 2147483647 (unsupported).");

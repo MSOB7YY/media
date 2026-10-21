@@ -146,6 +146,12 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
           elementState = ELEMENT_STATE_READ_ID;
           return true;
         case EbmlProcessor.ELEMENT_TYPE_UNKNOWN:
+          if (masterElementsStack.isEmpty()
+              && input.getLength() != C.LENGTH_UNSET
+              && input.getPosition() + elementContentSize > input.getLength()) {
+            // A top level element cut off by the end of the input is trailing data, like an ID3v1 tag.
+            return false;
+          }
           input.skipFully((int) elementContentSize);
           elementState = ELEMENT_STATE_READ_ID;
           break;

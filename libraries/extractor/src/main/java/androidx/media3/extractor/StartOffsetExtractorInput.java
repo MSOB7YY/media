@@ -19,6 +19,7 @@ import static androidx.annotation.RestrictTo.Scope.LIBRARY_GROUP;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import androidx.annotation.RestrictTo;
+import androidx.media3.common.C;
 
 /**
  * An extractor input that wraps another extractor input and exposes data starting at a given start
@@ -60,7 +61,8 @@ public final class StartOffsetExtractorInput extends ForwardingExtractorInput {
 
   @Override
   public long getLength() {
-    return super.getLength() - startOffset;
+    long length = super.getLength();
+    return length == C.LENGTH_UNSET ? C.LENGTH_UNSET : length - startOffset;
   }
 
   @Override

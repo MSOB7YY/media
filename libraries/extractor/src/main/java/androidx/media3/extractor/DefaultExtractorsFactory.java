@@ -136,6 +136,10 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         FileTypes.APE
       };
 
+  /** Containers MP3-only taggers put ID3v2 tags in front of, whose extractors don't skip them. */
+  private static final int[] LEADING_ID3_CANDIDATE_FILE_TYPES =
+      new int[] {FileTypes.MP4, FileTypes.MATROSKA, FileTypes.OGG, FileTypes.WAV, FileTypes.WAVPACK};
+
   private static final ExtensionLoader FLAC_EXTENSION_LOADER =
       new ExtensionLoader(DefaultExtractorsFactory::getFlacExtractorConstructor);
   private static final ExtensionLoader MIDI_EXTENSION_LOADER =
@@ -475,7 +479,16 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         addExtractorsForFileType(fileType, extractors);
       }
     }
+    extractors.add(new LeadingId3SkippingExtractor(this::createLeadingId3Candidates));
     return extractors.toArray(new Extractor[0]);
+  }
+
+  private synchronized Extractor[] createLeadingId3Candidates() {
+    List<Extractor> candidates = new ArrayList<>(/* initialCapacity= */ 6);
+    for (int fileType : LEADING_ID3_CANDIDATE_FILE_TYPES) {
+      addExtractorsForFileType(fileType, candidates);
+    }
+    return candidates.toArray(new Extractor[0]);
   }
 
   private void addExtractorsForFileType(@FileTypes.Type int fileType, List<Extractor> extractors) {
