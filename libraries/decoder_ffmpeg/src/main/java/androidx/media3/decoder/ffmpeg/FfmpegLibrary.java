@@ -150,6 +150,14 @@ public final class FfmpegLibrary {
         return "wavpack";
       case MimeTypes.AUDIO_APE:
         return "ape";
+      case MimeTypes.AUDIO_WMAV1:
+        return "wmav1";
+      case MimeTypes.AUDIO_WMAV2:
+        return "wmav2";
+      case MimeTypes.AUDIO_WMAPRO:
+        return "wmapro";
+      case MimeTypes.AUDIO_WMA_LOSSLESS:
+        return "wmalossless";
       case MimeTypes.AUDIO_MLAW:
         return "pcm_mulaw";
       case MimeTypes.AUDIO_ALAW:
@@ -187,6 +195,12 @@ public final class FfmpegLibrary {
         return "flv1";
       case MimeTypes.VIDEO_VC1:
         return "vc1";
+      case MimeTypes.VIDEO_WMV1:
+        return "wmv1";
+      case MimeTypes.VIDEO_WMV2:
+        return "wmv2";
+      case MimeTypes.VIDEO_WMV3:
+        return "wmv3";
       case MimeTypes.VIDEO_OGG:
         return "theora";
       default:

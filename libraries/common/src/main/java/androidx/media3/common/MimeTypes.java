@@ -63,9 +63,13 @@ public final class MimeTypes {
   public static final String VIDEO_DOLBY_VISION = BASE_TYPE_VIDEO + "/dolby-vision";
   public static final String VIDEO_OGG = BASE_TYPE_VIDEO + "/ogg";
   public static final String VIDEO_AVI = BASE_TYPE_VIDEO + "/x-msvideo";
+  @UnstableApi public static final String VIDEO_ASF = BASE_TYPE_VIDEO + "/x-ms-asf";
   public static final String VIDEO_MJPEG = BASE_TYPE_VIDEO + "/mjpeg";
   public static final String VIDEO_MP42 = BASE_TYPE_VIDEO + "/mp42";
   public static final String VIDEO_MP43 = BASE_TYPE_VIDEO + "/mp43";
+  @UnstableApi public static final String VIDEO_WMV1 = BASE_TYPE_VIDEO + "/x-ms-wmv1";
+  @UnstableApi public static final String VIDEO_WMV2 = BASE_TYPE_VIDEO + "/x-ms-wmv2";
+  @UnstableApi public static final String VIDEO_WMV3 = BASE_TYPE_VIDEO + "/x-ms-wmv3";
   @UnstableApi public static final String VIDEO_MV_HEVC = BASE_TYPE_VIDEO + "/mv-hevc";
   @UnstableApi public static final String VIDEO_RAW = BASE_TYPE_VIDEO + "/raw";
   @UnstableApi public static final String VIDEO_UNKNOWN = BASE_TYPE_VIDEO + "/x-unknown";
@@ -111,6 +115,10 @@ public final class MimeTypes {
   public static final String AUDIO_ALAC = BASE_TYPE_AUDIO + "/alac";
   @UnstableApi public static final String AUDIO_WAVPACK = BASE_TYPE_AUDIO + "/x-wavpack";
   @UnstableApi public static final String AUDIO_APE = BASE_TYPE_AUDIO + "/x-ape";
+  @UnstableApi public static final String AUDIO_WMAV1 = BASE_TYPE_AUDIO + "/x-ms-wmav1";
+  @UnstableApi public static final String AUDIO_WMAV2 = BASE_TYPE_AUDIO + "/x-ms-wmav2";
+  @UnstableApi public static final String AUDIO_WMAPRO = BASE_TYPE_AUDIO + "/x-ms-wmapro";
+  @UnstableApi public static final String AUDIO_WMA_LOSSLESS = BASE_TYPE_AUDIO + "/x-ms-wmalossless";
   public static final String AUDIO_MSGSM = BASE_TYPE_AUDIO + "/gsm";
   public static final String AUDIO_OGG = BASE_TYPE_AUDIO + "/ogg";
   public static final String AUDIO_WAV = BASE_TYPE_AUDIO + "/wav";
@@ -313,6 +321,10 @@ public final class MimeTypes {
       case AUDIO_FLAC:
       case AUDIO_WAVPACK:
       case AUDIO_APE:
+      case AUDIO_WMAV1:
+      case AUDIO_WMAV2:
+      case AUDIO_WMAPRO:
+      case AUDIO_WMA_LOSSLESS:
       case AUDIO_AC3:
       case AUDIO_E_AC3:
       case AUDIO_E_AC3_JOC:

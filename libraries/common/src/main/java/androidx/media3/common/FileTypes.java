@@ -61,6 +61,7 @@ public final class FileTypes {
    *   <li>{@link #AVIF}
    *   <li>{@link #WAVPACK}
    *   <li>{@link #APE}
+   *   <li>{@link #ASF}
    * </ul>
    */
   @Documented
@@ -68,7 +69,7 @@ public final class FileTypes {
   @Target(TYPE_USE)
   @IntDef({
     UNKNOWN, AC3, AC4, ADTS, AMR, FLAC, FLV, MATROSKA, MP3, MP4, OGG, PS, TS, WAV, WEBVTT, JPEG,
-    MIDI, AVI, PNG, WEBP, BMP, HEIF, AVIF, WAVPACK, APE
+    MIDI, AVI, PNG, WEBP, BMP, HEIF, AVIF, WAVPACK, APE, ASF
   })
   public @interface Type {}
 
@@ -147,6 +148,9 @@ public final class FileTypes {
   /** File type for the Monkey's Audio (APE) format. */
   public static final int APE = 23;
 
+  /** File type for the Advanced Systems Format (ASF, WMV, WMA). */
+  public static final int ASF = 24;
+
   @VisibleForTesting /* package */ static final String HEADER_CONTENT_TYPE = "Content-Type";
 
   private static final String EXTENSION_AC3 = ".ac3";
@@ -191,6 +195,9 @@ public final class FileTypes {
   private static final String EXTENSION_AVIF = ".avif";
   private static final String EXTENSION_WAVPACK = ".wv";
   private static final String EXTENSION_APE = ".ape";
+  private static final String EXTENSION_ASF = ".asf";
+  private static final String EXTENSION_WMV = ".wmv";
+  private static final String EXTENSION_WMA = ".wma";
 
   private FileTypes() {}
 
@@ -271,6 +278,8 @@ public final class FileTypes {
         return FileTypes.WAVPACK;
       case MimeTypes.AUDIO_APE:
         return FileTypes.APE;
+      case MimeTypes.VIDEO_ASF:
+        return FileTypes.ASF;
       default:
         return FileTypes.UNKNOWN;
     }
@@ -352,6 +361,10 @@ public final class FileTypes {
       return FileTypes.WAVPACK;
     } else if (filename.endsWith(EXTENSION_APE)) {
       return FileTypes.APE;
+    } else if (filename.endsWith(EXTENSION_ASF)
+        || filename.endsWith(EXTENSION_WMV)
+        || filename.endsWith(EXTENSION_WMA)) {
+      return FileTypes.ASF;
     } else {
       return FileTypes.UNKNOWN;
     }

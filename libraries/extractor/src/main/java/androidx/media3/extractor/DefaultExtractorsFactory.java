@@ -30,6 +30,7 @@ import androidx.media3.common.util.TimestampAdjuster;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.extractor.amr.AmrExtractor;
 import androidx.media3.extractor.ape.ApeExtractor;
+import androidx.media3.extractor.asf.AsfExtractor;
 import androidx.media3.extractor.avi.AviExtractor;
 import androidx.media3.extractor.avif.AvifExtractor;
 import androidx.media3.extractor.bmp.BmpExtractor;
@@ -133,12 +134,20 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         FileTypes.HEIF,
         FileTypes.AVIF,
         FileTypes.WAVPACK,
-        FileTypes.APE
+        FileTypes.APE,
+        FileTypes.ASF
       };
 
   /** Containers MP3-only taggers put ID3v2 tags in front of, whose extractors don't skip them. */
   private static final int[] LEADING_ID3_CANDIDATE_FILE_TYPES =
-      new int[] {FileTypes.MP4, FileTypes.MATROSKA, FileTypes.OGG, FileTypes.WAV, FileTypes.WAVPACK};
+      new int[] {
+        FileTypes.MP4,
+        FileTypes.MATROSKA,
+        FileTypes.OGG,
+        FileTypes.WAV,
+        FileTypes.WAVPACK,
+        FileTypes.ASF
+      };
 
   private static final ExtensionLoader FLAC_EXTENSION_LOADER =
       new ExtensionLoader(DefaultExtractorsFactory::getFlacExtractorConstructor);
@@ -484,7 +493,7 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
   }
 
   private synchronized Extractor[] createLeadingId3Candidates() {
-    List<Extractor> candidates = new ArrayList<>(/* initialCapacity= */ 6);
+    List<Extractor> candidates = new ArrayList<>(/* initialCapacity= */ 7);
     for (int fileType : LEADING_ID3_CANDIDATE_FILE_TYPES) {
       addExtractorsForFileType(fileType, candidates);
     }
@@ -635,6 +644,9 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         break;
       case FileTypes.APE:
         extractors.add(new ApeExtractor());
+        break;
+      case FileTypes.ASF:
+        extractors.add(new AsfExtractor());
         break;
       case FileTypes.WEBVTT:
       case FileTypes.UNKNOWN:

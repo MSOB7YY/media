@@ -16,6 +16,7 @@
 package androidx.media3.decoder.ffmpeg;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.lang.Math.min;
 
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
@@ -46,6 +47,9 @@ public final class FfmpegAudioDecoder
   private static final int FLAC_METADATA_TYPE_STREAM_INFO = 0;
   private static final int FLAC_METADATA_BLOCK_HEADER_SIZE = 4;
   private static final int FLAC_STREAM_INFO_DATA_SIZE = 34;
+
+  private static final int WAVE_FORMAT_AVG_BYTES_PER_SEC_OFFSET = 8;
+  private static final int WAVE_FORMAT_CB_SIZE_OFFSET = 16;
 
   private final String codecName;
   @Nullable private final byte[] extraData;
@@ -79,6 +83,15 @@ public final class FfmpegAudioDecoder
         format.pcmEncoding == Format.NO_VALUE
             ? Format.NO_VALUE
             : Util.getByteDepth(format.pcmEncoding) * C.BITS_PER_BYTE;
+    int blockAlign = Format.NO_VALUE;
+    int bitrate = Format.NO_VALUE;
+    if (isWma(format.sampleMimeType)) {
+      ParsableByteArray waveFormat = new ParsableByteArray(format.initializationData.get(0));
+      waveFormat.setPosition(WAVE_FORMAT_AVG_BYTES_PER_SEC_OFFSET);
+      int avgBytesPerSec = waveFormat.readLittleEndianInt();
+      bitrate = avgBytesPerSec * C.BITS_PER_BYTE;
+      blockAlign = waveFormat.readLittleEndianUnsignedShort();
+    }
     nativeContext =
         ffmpegInitialize(
             codecName,
@@ -86,7 +99,9 @@ public final class FfmpegAudioDecoder
             outputFloat,
             format.sampleRate,
             format.channelCount,
-            bitsPerSample);
+            bitsPerSample,
+            blockAlign,
+            bitrate);
     if (nativeContext == 0) {
       throw new FfmpegDecoderException("Initialization failed.");
     }
@@ -201,6 +216,9 @@ public final class FfmpegAudioDecoder
    */
   @Nullable
   private static byte[] getExtraData(String mimeType, List<byte[]> initializationData) {
+    if (isWma(mimeType)) {
+      return getWaveFormatExtraData(initializationData.get(0));
+    }
     switch (mimeType) {
       case MimeTypes.AUDIO_AAC:
       case MimeTypes.AUDIO_OPUS:
@@ -216,6 +234,28 @@ public final class FfmpegAudioDecoder
         // Other codecs do not require extra data.
         return null;
     }
+  }
+
+  private static boolean isWma(String mimeType) {
+    switch (mimeType) {
+      case MimeTypes.AUDIO_WMAV1:
+      case MimeTypes.AUDIO_WMAV2:
+      case MimeTypes.AUDIO_WMAPRO:
+      case MimeTypes.AUDIO_WMA_LOSSLESS:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private static byte[] getWaveFormatExtraData(byte[] waveFormat) {
+    ParsableByteArray data = new ParsableByteArray(waveFormat);
+    data.setPosition(WAVE_FORMAT_CB_SIZE_OFFSET);
+    int cbSize = data.readLittleEndianUnsignedShort();
+    int size = min(cbSize, data.bytesLeft());
+    byte[] extraData = new byte[size];
+    data.readBytes(extraData, /* offset= */ 0, size);
+    return extraData;
   }
 
   private static byte[] getAlacExtraData(List<byte[]> initializationData) {
@@ -315,7 +355,9 @@ public final class FfmpegAudioDecoder
       boolean outputFloat,
       int rawSampleRate,
       int rawChannelCount,
-      int bitsPerSample);
+      int bitsPerSample,
+      int blockAlign,
+      int bitrate);
 
   private native int ffmpegDecode(
       long context,
