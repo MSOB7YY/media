@@ -234,6 +234,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
   private final PriorityQueue<Long> discardedDecoderInputBufferTimestamps;
   private final boolean enableMediaCodecBufferDecodeOnlyFlag;
   private final boolean enableDurationToProgressUs;
+  private final long earlySchedulingThresholdUs;
 
   private @MonotonicNonNull CodecMaxValues codecMaxValues;
   private boolean codecNeedsSetOutputSurfaceWorkaround;
@@ -707,6 +708,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
     }
     enableMediaCodecBufferDecodeOnlyFlag = builder.enableMediaCodecBufferDecodeOnlyFlag;
     enableDurationToProgressUs = builder.enableDurationToProgressUs;
+    earlySchedulingThresholdUs = builder.earlySchedulingThresholdUs;
     nextOutputBufferToProcessPresentationTimeUs = C.TIME_UNSET;
     scrubbingModeParameters = null;
   }
@@ -1602,8 +1604,9 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
       long durationUs = videoFrameReleaseInfo.getEarlyUs();
       // Rebase duration to the start of this iteration of the rendering loop.
       durationUs += Util.msToUs(getClock().elapsedRealtime()) - elapsedRealtimeUs;
-      // Set a lower bound of waking within 1.5*VSync rate at 60 fps(25 ms).
-      return max(0, durationUs - 25_000);
+      // Set a lower bound of waking within 1.5*VSync rate at 60 fps(25 ms), but never before the
+      // frame can be scheduled, so a small early scheduling threshold releases right on time.
+      return max(0, durationUs - min(earlySchedulingThresholdUs, 25_000));
     } catch (ExoPlaybackException exoPlaybackException) {
       Log.w(TAG, "Error while evaluating frame release action");
     }
