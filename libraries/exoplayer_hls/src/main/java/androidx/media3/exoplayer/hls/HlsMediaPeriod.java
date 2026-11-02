@@ -339,6 +339,7 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
     }
 
     boolean forceReset = false;
+    boolean isPreviousPrimaryWrapperKept = isPreviousPrimaryWrapperSelected(selectionChildIndices);
     streamWrapperIndices.clear();
     // Select tracks for each child, copying the resulting streams back into a new streams array.
     SampleStream[] newStreams = new SampleStream[selections.length];
@@ -382,9 +383,16 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
           // that the first wrapper will correspond to a variant, or else an audio rendition, or
           // else a text rendition, in that order.
           sampleStreamWrapper.setIsPrimaryTimestampSource(true);
-          if (wasReset
-              || enabledSampleStreamWrappers.length == 0
-              || sampleStreamWrapper != enabledSampleStreamWrappers[0]) {
+          // A wrapper enabled again next to the previous primary one, which keeps playing (ex: a
+          // video variant re-enabled next to an audio rendition), reuses the timestamp adjusters
+          // that one initialized. Resetting them would reload the playing wrapper too.
+          boolean isRejoiningKeptPrimary =
+              isPreviousPrimaryWrapperKept
+                  && !Util.contains(enabledSampleStreamWrappers, sampleStreamWrapper);
+          if (!isRejoiningKeptPrimary
+              && (wasReset
+                  || enabledSampleStreamWrappers.length == 0
+                  || sampleStreamWrapper != enabledSampleStreamWrappers[0])) {
             // The wrapper responsible for initializing the timestamp adjusters was reset or
             // changed. We need to reset the timestamp adjuster provider and all other wrappers.
             timestampAdjusterProvider.reset();
@@ -521,6 +529,20 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
   }
 
   // Internal methods.
+
+  private boolean isPreviousPrimaryWrapperSelected(int[] selectionChildIndices) {
+    if (enabledSampleStreamWrappers.length == 0) {
+      return false;
+    }
+    HlsSampleStreamWrapper previousPrimaryWrapper = enabledSampleStreamWrappers[0];
+    for (int childIndex : selectionChildIndices) {
+      if (childIndex != C.INDEX_UNSET
+          && sampleStreamWrappers[childIndex] == previousPrimaryWrapper) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   private void buildAndPrepareSampleStreamWrappers(long positionUs) {
     HlsMultivariantPlaylist multivariantPlaylist =
